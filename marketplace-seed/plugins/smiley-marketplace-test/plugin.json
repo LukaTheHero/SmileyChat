@@ -1,0 +1,10 @@
+{
+    "id": "smiley-marketplace-test",
+    "name": "Marketplace Test",
+    "version": "1.0.0",
+    "description": "Demonstrates the marketplace install flow. Adds a {{marketplace-test}} macro that returns a fixed string.",
+    "main": "dist/index.js",
+    "permissions": ["presets:macros"],
+    "category": "tools",
+    "enabled": true
+}

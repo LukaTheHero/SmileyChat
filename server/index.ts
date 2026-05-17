@@ -60,6 +60,11 @@ import {
     readPluginProfiles,
     writePluginProfiles,
 } from "./plugin-profiles";
+import {
+    installMarketplacePlugin,
+    readMarketplaceListing,
+    uninstallMarketplacePlugin,
+} from "./plugin-marketplace";
 import { finalize, runSecurityPipeline } from "./security/pipeline";
 import {
     readAppPreferences,
@@ -127,6 +132,24 @@ const server = Bun.serve({
         "/api/plugins/fetch": {
             POST: api(async (request) => {
                 return proxyPluginFetch(await readJsonBody(request));
+            }),
+        },
+
+        "/api/plugins/marketplace": {
+            GET: api(async () => {
+                return readMarketplaceListing();
+            }),
+        },
+
+        "/api/plugins/marketplace/install": {
+            POST: api(async (request) => {
+                return installMarketplacePlugin(await readJsonBody(request));
+            }),
+        },
+
+        "/api/plugins/marketplace/:pluginId": {
+            DELETE: api(async (request) => {
+                return uninstallMarketplacePlugin(request.params.pluginId);
             }),
         },
 

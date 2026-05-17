@@ -128,6 +128,25 @@ export function isPluginsOutboundFetchAllowed() {
     return isEnabledFlag(process.env.SMILEYCHAT_PLUGINS_ALLOW_OUTBOUND_FETCH);
 }
 
+// Plugin marketplace source. Curated registry of installable plugins,
+// fetched as raw files over HTTPS. Default points at the LukaTheHero
+// dev repo while the marketplace concept is incubating; flip to the
+// upstream repo once the feature graduates by setting this env var or
+// changing the constant below.
+const DEFAULT_PLUGIN_MARKETPLACE_SOURCE =
+    "https://raw.githubusercontent.com/LukaTheHero/smileychat-plugins/main";
+
+export function getPluginMarketplaceSource() {
+    return (
+        normalizeEnvValue(process.env.SMILEYCHAT_PLUGIN_MARKETPLACE_SOURCE) ??
+        DEFAULT_PLUGIN_MARKETPLACE_SOURCE
+    );
+}
+
+export function isPluginMarketplaceEnabled() {
+    return !isDisabledFlag(process.env.SMILEYCHAT_PLUGIN_MARKETPLACE_ENABLED);
+}
+
 export function getLogLevel() {
     return normalizeEnvValue(process.env.SMILEYCHAT_LOG_LEVEL) ?? "info";
 }

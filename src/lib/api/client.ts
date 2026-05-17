@@ -282,6 +282,41 @@ export function savePluginStorageSnapshot(
     );
 }
 
+export type MarketplacePluginEntry = {
+    id: string;
+    name: string;
+    version: string;
+    description?: string;
+    author?: string;
+    category?: string;
+    permissions?: string[];
+    path: string;
+    files: string[];
+    installed: boolean;
+};
+
+export type MarketplaceListing =
+    | { enabled: true; source: string; plugins: MarketplacePluginEntry[] }
+    | { enabled: false; reason: string };
+
+export function loadMarketplaceListing() {
+    return requestJson<MarketplaceListing>("/api/plugins/marketplace");
+}
+
+export function installMarketplacePlugin(pluginId: string) {
+    return requestJson<{ ok: true; plugin: MarketplacePluginEntry }>(
+        "/api/plugins/marketplace/install",
+        jsonInit("POST", { id: pluginId }),
+    );
+}
+
+export function uninstallMarketplacePlugin(pluginId: string) {
+    return requestJson<{ ok: true }>(
+        `/api/plugins/marketplace/${encodeURIComponent(pluginId)}`,
+        { method: "DELETE" },
+    );
+}
+
 export function savePresetCollection(presets: PresetCollection) {
     return requestJson<{ ok: true; presets: PresetCollection }>(
         "/api/presets",

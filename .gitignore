@@ -4,6 +4,11 @@ node_modules/
 # Build output
 dist/
 
+# Marketplace seed dist files are intentionally committed: they're the
+# bundled plugin code we push to the curated plugins repo.
+!marketplace-seed/**/dist/
+!marketplace-seed/**/dist/**
+
 # Local app data
 # SmileyChat user data is created and edited by the local runtime.
 # Keep default/seed data in src/ or docs/, not in userData/.

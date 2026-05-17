@@ -4,6 +4,7 @@ import {
     Bot,
     Boxes,
     CheckCircle2,
+    Download,
     Layers,
     Layout,
     Pencil,
@@ -16,8 +17,11 @@ import {
     Search,
     Settings,
     Sparkles,
+    Store,
     Trash2,
+    User,
     Wrench,
+    X,
     XCircle,
 } from "lucide-preact";
 import type { FunctionComponent } from "preact";
@@ -26,10 +30,15 @@ import { useEffect, useMemo, useState } from "preact/hooks";
 import { mergeCoreAndUserPluginManifests } from "#frontend/core-extensions";
 import {
     deletePluginProfile,
+    installMarketplacePlugin,
+    loadMarketplaceListing,
     loadPluginManifests,
     loadPluginProfiles,
     savePluginEnabled,
     savePluginProfilesState,
+    uninstallMarketplacePlugin,
+    type MarketplaceListing,
+    type MarketplacePluginEntry,
     type PluginProfilesPayload,
 } from "#frontend/lib/api/client";
 import { messageFromError } from "#frontend/lib/common/errors";
@@ -96,6 +105,7 @@ export function PluginsSettings({ pluginSnapshot }: PluginsSettingsProps) {
     const [installedFilter, setInstalledFilter] = useState<InstalledFilter>("all");
     const [categoryFilter, setCategoryFilter] = useState<PluginCategory | "all">("all");
     const [, setRegistryRevision] = useState(0);
+    const [marketplaceOpen, setMarketplaceOpen] = useState(false);
     const loadedPlugins = getLoadedPlugins();
     const pluginSettingsPanels = getPluginSettingsPanels();
 
@@ -410,14 +420,24 @@ export function PluginsSettings({ pluginSnapshot }: PluginsSettingsProps) {
                         tune the engine for the experience you want.
                     </p>
                 </div>
-                <button
-                    type="button"
-                    disabled={requestState === "loading"}
-                    onClick={() => void refreshAll()}
-                >
-                    <RefreshCw size={16} />
-                    Refresh
-                </button>
+                <div className="plugins-heading-actions">
+                    <button
+                        type="button"
+                        disabled={requestState === "loading"}
+                        onClick={() => setMarketplaceOpen(true)}
+                    >
+                        <Store size={16} />
+                        Explore plugins
+                    </button>
+                    <button
+                        type="button"
+                        disabled={requestState === "loading"}
+                        onClick={() => void refreshAll()}
+                    >
+                        <RefreshCw size={16} />
+                        Refresh
+                    </button>
+                </div>
             </div>
 
             <ProfileBar
@@ -554,7 +574,213 @@ export function PluginsSettings({ pluginSnapshot }: PluginsSettingsProps) {
             {statusMessage && (
                 <p className={`connection-status ${requestState}`}>{statusMessage}</p>
             )}
+
+            {marketplaceOpen && (
+                <MarketplaceModal
+                    onClose={() => setMarketplaceOpen(false)}
+                    onChange={() => void refreshAll()}
+                />
+            )}
         </section>
+    );
+}
+
+type MarketplaceModalProps = {
+    onClose: () => void;
+    onChange: () => void;
+};
+
+function MarketplaceModal({ onClose, onChange }: MarketplaceModalProps) {
+    const [listing, setListing] = useState<MarketplaceListing | null>(null);
+    const [busyId, setBusyId] = useState("");
+    const [error, setError] = useState("");
+
+    useEffect(() => {
+        void refresh();
+    }, []);
+
+    async function refresh() {
+        try {
+            const response = await loadMarketplaceListing();
+            setListing(response);
+            setError("");
+        } catch (caught) {
+            setError(messageFromError(caught, "Could not load the marketplace."));
+        }
+    }
+
+    async function install(entry: MarketplacePluginEntry) {
+        setBusyId(entry.id);
+        try {
+            await installMarketplacePlugin(entry.id);
+            await refresh();
+            onChange();
+        } catch (caught) {
+            setError(messageFromError(caught, "Install failed."));
+        } finally {
+            setBusyId("");
+        }
+    }
+
+    async function uninstall(entry: MarketplacePluginEntry) {
+        setBusyId(entry.id);
+        try {
+            await uninstallMarketplacePlugin(entry.id);
+            await refresh();
+            onChange();
+        } catch (caught) {
+            setError(messageFromError(caught, "Uninstall failed."));
+        } finally {
+            setBusyId("");
+        }
+    }
+
+    return (
+        <div
+            className="marketplace-backdrop"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Plugin marketplace"
+            onClick={onClose}
+        >
+            <div
+                className="marketplace-modal"
+                onClick={(event) => event.stopPropagation()}
+            >
+                <header>
+                    <div>
+                        <h2>
+                            <Store size={18} />
+                            Plugin marketplace
+                        </h2>
+                        {listing && listing.enabled && (
+                            <small>Source: {listing.source}</small>
+                        )}
+                    </div>
+                    <button
+                        type="button"
+                        className="marketplace-close"
+                        onClick={onClose}
+                        aria-label="Close"
+                    >
+                        <X size={18} />
+                    </button>
+                </header>
+
+                <div className="marketplace-body">
+                    {error && <p className="connection-status error">{error}</p>}
+
+                    {!listing && !error && <p>Loading...</p>}
+
+                    {listing && !listing.enabled && (
+                        <p className="connection-status error">{listing.reason}</p>
+                    )}
+
+                    {listing && listing.enabled && listing.plugins.length === 0 && (
+                        <p>The marketplace is empty.</p>
+                    )}
+
+                    {listing && listing.enabled && listing.plugins.length > 0 && (
+                        <div className="marketplace-list">
+                            {listing.plugins.map((entry) => (
+                                <MarketplaceCard
+                                    key={entry.id}
+                                    entry={entry}
+                                    busy={busyId === entry.id}
+                                    onInstall={() => void install(entry)}
+                                    onUninstall={() => void uninstall(entry)}
+                                />
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+type MarketplaceCardProps = {
+    entry: MarketplacePluginEntry;
+    busy: boolean;
+    onInstall: () => void;
+    onUninstall: () => void;
+};
+
+function MarketplaceCard({ entry, busy, onInstall, onUninstall }: MarketplaceCardProps) {
+    const categoryKey = (entry.category as PluginCategory | undefined) ?? "other";
+    const CategoryIcon = CATEGORY_ICONS[categoryKey] ?? Boxes;
+    const categoryLabel = PLUGIN_CATEGORY_LABELS[categoryKey] ?? "Other";
+
+    return (
+        <article className="marketplace-card">
+            <header>
+                <div className="marketplace-card-title">
+                    <Boxes size={18} />
+                    <div>
+                        <h3>
+                            {entry.name}
+                            <span className="marketplace-category-badge">
+                                <CategoryIcon size={11} />
+                                {categoryLabel}
+                            </span>
+                        </h3>
+                        <span className="marketplace-card-id">{entry.id}</span>
+                    </div>
+                </div>
+                {entry.installed ? (
+                    <button
+                        type="button"
+                        className="marketplace-uninstall danger-button"
+                        disabled={busy}
+                        onClick={onUninstall}
+                    >
+                        <Trash2 size={14} />
+                        Uninstall
+                    </button>
+                ) : (
+                    <button
+                        type="button"
+                        className="marketplace-install"
+                        disabled={busy}
+                        onClick={onInstall}
+                    >
+                        <Download size={14} />
+                        {busy ? "Installing..." : "Install"}
+                    </button>
+                )}
+            </header>
+
+            {entry.description && (
+                <p className="marketplace-card-description">{entry.description}</p>
+            )}
+
+            <dl className="marketplace-card-meta">
+                <div>
+                    <dt>Version</dt>
+                    <dd>{entry.version}</dd>
+                </div>
+                {entry.author && (
+                    <div>
+                        <dt>
+                            <User size={11} />
+                            Author
+                        </dt>
+                        <dd>{entry.author}</dd>
+                    </div>
+                )}
+            </dl>
+
+            {entry.permissions && entry.permissions.length > 0 && (
+                <div className="marketplace-card-permissions">
+                    <span>Permissions</span>
+                    <div>
+                        {entry.permissions.map((permission) => (
+                            <code key={permission}>{permission}</code>
+                        ))}
+                    </div>
+                </div>
+            )}
+        </article>
     );
 }
 
