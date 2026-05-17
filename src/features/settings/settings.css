@@ -1123,6 +1123,17 @@
     height: 18px;
 }
 
+.settings-number-input {
+    justify-self: end;
+    width: 108px;
+    min-height: 36px;
+    border: 1px solid #303440;
+    border-radius: 8px;
+    background: #15181e;
+    color: #ececf1;
+    padding: 0 10px;
+}
+
 .settings-segmented-control {
     display: grid;
     justify-self: end;

@@ -1,5 +1,6 @@
 import {
     AlertTriangle,
+    ArrowDown,
     Check,
     ChevronLeft,
     ChevronRight,
@@ -10,7 +11,7 @@ import {
     User,
     X,
 } from "lucide-preact";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 
 import { formatShortTime } from "#frontend/lib/common/time";
 import {
@@ -33,10 +34,12 @@ type MessageListProps = {
     characterAvatarPath?: string;
     characterName: string;
     errorMessage?: string;
+    initialMessageCount: number;
     isTyping?: boolean;
     messages: Message[];
     mode: ChatMode;
     pendingSwipeMessageId?: string;
+    resetKey: string;
     showRpCharacterImages: boolean;
     showTimestamps: boolean;
     onDeleteMessage: (messageId: string) => void;
@@ -51,10 +54,12 @@ export function MessageList({
     characterAvatarPath,
     characterName,
     errorMessage,
+    initialMessageCount,
     isTyping,
     messages,
     mode,
     pendingSwipeMessageId,
+    resetKey,
     showRpCharacterImages,
     showTimestamps,
     onDeleteMessage,
@@ -64,7 +69,15 @@ export function MessageList({
     pluginSnapshot,
 }: MessageListProps) {
     const listRef = useRef<HTMLDivElement>(null);
+    const topSentinelRef = useRef<HTMLDivElement>(null);
+    const previousScrollHeightRef = useRef<number | undefined>(undefined);
+    const isLoadingEarlierRef = useRef(false);
+    const needsInitialBottomScrollRef = useRef(true);
     const shouldAutoScrollRef = useRef(true);
+    const [visibleCount, setVisibleCount] = useState(() =>
+        normalizeMessageWindowSize(initialMessageCount),
+    );
+    const [showJumpToBottom, setShowJumpToBottom] = useState(false);
     const [openMenuMessageId, setOpenMenuMessageId] = useState("");
     const [editingMessageId, setEditingMessageId] = useState("");
     const [editingDraft, setEditingDraft] = useState("");
@@ -115,6 +128,7 @@ export function MessageList({
 
         const distanceFromBottom = list.scrollHeight - list.scrollTop - list.clientHeight;
         shouldAutoScrollRef.current = distanceFromBottom < 80;
+        setShowJumpToBottom(distanceFromBottom > 320);
     }
 
     function startEditing(message: Message) {
@@ -161,15 +175,91 @@ export function MessageList({
 
     const messageRenderers = getMessageRenderers();
     const pluginMessageActions = getPluginMessageActions();
+    const visibleMessages = messages.slice(-visibleCount);
+    const hasEarlierMessages = visibleCount < messages.length;
+
+    useEffect(() => {
+        needsInitialBottomScrollRef.current = true;
+        shouldAutoScrollRef.current = true;
+        setShowJumpToBottom(false);
+        setVisibleCount(normalizeMessageWindowSize(initialMessageCount));
+    }, [initialMessageCount, resetKey]);
+
+    useEffect(() => {
+        const list = listRef.current;
+        const topSentinel = topSentinelRef.current;
+
+        if (!list || !topSentinel || !hasEarlierMessages) {
+            return;
+        }
+
+        const observer = new IntersectionObserver(
+            ([entry]) => {
+                if (entry?.isIntersecting && !needsInitialBottomScrollRef.current) {
+                    loadEarlierMessages();
+                }
+            },
+            {
+                root: list,
+                rootMargin: "140px 0px 0px 0px",
+                threshold: 0,
+            },
+        );
+
+        observer.observe(topSentinel);
+
+        return () => observer.disconnect();
+    }, [hasEarlierMessages, messages.length, visibleCount]);
+
+    useLayoutEffect(() => {
+        const list = listRef.current;
+        const previousScrollHeight = previousScrollHeightRef.current;
+
+        if (!list) {
+            return;
+        }
+
+        if (
+            previousScrollHeight !== undefined &&
+            isLoadingEarlierRef.current
+        ) {
+            list.scrollTop += list.scrollHeight - previousScrollHeight;
+            previousScrollHeightRef.current = undefined;
+            isLoadingEarlierRef.current = false;
+            return;
+        }
+
+        if (needsInitialBottomScrollRef.current) {
+            snapToBottom(list);
+            needsInitialBottomScrollRef.current = false;
+            shouldAutoScrollRef.current = true;
+            setShowJumpToBottom(false);
+        }
+    }, [visibleCount, messages.length]);
 
     return (
-        <div
-            className="message-list"
-            ref={listRef}
-            aria-live="polite"
-            onScroll={updateAutoScrollPreference}
-        >
-            {messages.map((message) => {
+        <div className="message-list-shell">
+            <div
+                className="message-list"
+                ref={listRef}
+                aria-live="polite"
+                onScroll={updateAutoScrollPreference}
+            >
+                <div
+                    className="message-list-sentinel"
+                    ref={topSentinelRef}
+                    aria-hidden="true"
+                />
+                {hasEarlierMessages && (
+                    <button
+                        className="load-earlier-messages"
+                        type="button"
+                        onClick={loadEarlierMessages}
+                    >
+                        Load earlier messages
+                    </button>
+                )}
+                {visibleMessages.map((message) => {
                 const content = getMessageContent(message);
                 const attachments = getMessageAttachments(message);
                 const reasoning = getMessageReasoning(message);
@@ -378,11 +468,25 @@ export function MessageList({
                         </div>
                     </article>
                 );
-            })}
+                })}
 
-            {isTyping && <TypingIndicator characterName={characterName} mode={mode} />}
-            {copyError && <p className="chat-error">{copyError}</p>}
-            {errorMessage && <p className="chat-error">{errorMessage}</p>}
+                {isTyping && (
+                    <TypingIndicator characterName={characterName} mode={mode} />
+                )}
+                {copyError && <p className="chat-error">{copyError}</p>}
+                {errorMessage && <p className="chat-error">{errorMessage}</p>}
+            </div>
+            {showJumpToBottom && (
+                <button
+                    className="jump-to-bottom-button"
+                    type="button"
+                    title="Go to latest message"
+                    aria-label="Go to latest message"
+                    onClick={scrollToBottom}
+                >
+                    <ArrowDown size={18} />
+                </button>
+            )}
             {deleteCandidate && (
                 <div
                     className="message-confirm-backdrop"
@@ -423,6 +527,56 @@ export function MessageList({
             )}
         </div>
     );
+
+    function loadEarlierMessages() {
+        if (!hasEarlierMessages) {
+            return;
+        }
+
+        const list = listRef.current;
+
+        if (list) {
+            previousScrollHeightRef.current = list.scrollHeight;
+            isLoadingEarlierRef.current = true;
+        }
+
+        setVisibleCount((current) =>
+            Math.min(messages.length, current + LOAD_EARLIER_BATCH_SIZE),
+        );
+    }
+
+    function scrollToBottom() {
+        const list = listRef.current;
+
+        if (!list) {
+            return;
+        }
+
+        shouldAutoScrollRef.current = true;
+        setShowJumpToBottom(false);
+        list.scrollTo({
+            top: list.scrollHeight,
+            behavior: "smooth",
+        });
+    }
+}
+
+const LOAD_EARLIER_BATCH_SIZE = 50;
+
+function snapToBottom(list: HTMLDivElement) {
+    list.scrollTop = list.scrollHeight;
+
+    requestAnimationFrame(() => {
+        list.scrollTop = list.scrollHeight;
+    });
+}
+
+function normalizeMessageWindowSize(value: number) {
+    if (!Number.isFinite(value)) {
+        return LOAD_EARLIER_BATCH_SIZE;
+    }
+
+    return Math.max(1, Math.round(value));
 }
 
 function TypingIndicator({
