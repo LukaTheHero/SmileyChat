@@ -35,6 +35,7 @@ export const personaAssetsDir = join(userDataDir, "personas", "assets");
 export const personaOrphanedDir = join(userDataDir, "personas", "orphaned");
 export const pluginsDir = join(userDataDir, "plugins");
 export const coreExtensionsDataDir = join(userDataDir, "settings", "core-extensions");
+export const pluginProfilesPath = join(userDataDir, "settings", "plugin-profiles.json");
 
 export const maxAvatarBytes = 20 * 1024 * 1024;
 export const maxChatAssetBytes = 25 * 1024 * 1024;

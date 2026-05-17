@@ -10,4 +10,5 @@ export const smileyChatFormatterManifest: PluginManifest = {
     permissions: ["ui:messages", "ui:settings", "ui:styles"],
     enabled: true,
     source: "core",
+    category: "interface",
 };

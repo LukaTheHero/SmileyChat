@@ -1,9 +1,49 @@
-import { Boxes, CheckCircle2, Power, RefreshCw, Settings, XCircle } from "lucide-preact";
-import { useEffect, useState } from "preact/hooks";
+import {
+    ArrowLeftRight,
+    BookOpen,
+    Bot,
+    Boxes,
+    CheckCircle2,
+    Layers,
+    Layout,
+    Pencil,
+    Plug,
+    Plus,
+    Power,
+    RefreshCw,
+    RotateCcw,
+    Save,
+    Search,
+    Settings,
+    Sparkles,
+    Trash2,
+    Wrench,
+    XCircle,
+} from "lucide-preact";
+import type { FunctionComponent } from "preact";
+import { useEffect, useMemo, useState } from "preact/hooks";
 
 import { mergeCoreAndUserPluginManifests } from "#frontend/core-extensions";
-import { loadPluginManifests, savePluginEnabled } from "#frontend/lib/api/client";
+import {
+    deletePluginProfile,
+    loadPluginManifests,
+    loadPluginProfiles,
+    savePluginEnabled,
+    savePluginProfilesState,
+    type PluginProfilesPayload,
+} from "#frontend/lib/api/client";
 import { messageFromError } from "#frontend/lib/common/errors";
+import {
+    applyProfileToPlugins,
+    snapshotAllPluginConfigs,
+} from "#frontend/lib/plugins/activation";
+import {
+    BUILT_IN_PROFILES,
+    DEFAULT_PROFILE_ID,
+    isStateCustom,
+    type PluginProfile,
+    type PluginProfilesState,
+} from "#frontend/lib/plugins/profiles";
 import {
     deactivatePlugin,
     getLoadedPlugins,
@@ -16,7 +56,13 @@ import {
     loadCoreRuntimePlugin,
     loadRuntimePlugin,
 } from "#frontend/lib/plugins/runtime";
-import type { PluginAppSnapshot, PluginManifest } from "#frontend/lib/plugins/types";
+import {
+    PLUGIN_CATEGORIES,
+    PLUGIN_CATEGORY_LABELS,
+    type PluginAppSnapshot,
+    type PluginCategory,
+    type PluginManifest,
+} from "#frontend/lib/plugins/types";
 
 type RequestState = "idle" | "loading" | "success" | "error";
 
@@ -24,17 +70,37 @@ type PluginsSettingsProps = {
     pluginSnapshot: PluginAppSnapshot;
 };
 
+type InstalledFilter = "all" | "installed" | "not-installed";
+
+const CATEGORY_ICONS: Record<
+    PluginCategory,
+    FunctionComponent<{ size?: number | string }>
+> = {
+    interface: Layout,
+    "input-output": ArrowLeftRight,
+    automation: Bot,
+    connections: Plug,
+    tools: Wrench,
+    "memory-lore": BookOpen,
+    other: Boxes,
+};
+
 export function PluginsSettings({ pluginSnapshot }: PluginsSettingsProps) {
     const [plugins, setPlugins] = useState<PluginManifest[]>([]);
+    const [profilesPayload, setProfilesPayload] =
+        useState<PluginProfilesPayload | null>(null);
     const [requestState, setRequestState] = useState<RequestState>("idle");
     const [statusMessage, setStatusMessage] = useState("");
     const [openPluginId, setOpenPluginId] = useState("");
+    const [searchTerm, setSearchTerm] = useState("");
+    const [installedFilter, setInstalledFilter] = useState<InstalledFilter>("all");
+    const [categoryFilter, setCategoryFilter] = useState<PluginCategory | "all">("all");
     const [, setRegistryRevision] = useState(0);
     const loadedPlugins = getLoadedPlugins();
     const pluginSettingsPanels = getPluginSettingsPanels();
 
     useEffect(() => {
-        void refreshPlugins();
+        void refreshAll();
     }, []);
 
     useEffect(
@@ -45,13 +111,96 @@ export function PluginsSettings({ pluginSnapshot }: PluginsSettingsProps) {
         [],
     );
 
-    async function refreshPlugins() {
+    const currentEnabledMap = useMemo(() => {
+        const map: Record<string, boolean> = {};
+        for (const plugin of plugins) {
+            map[plugin.id] = plugin.enabled !== false;
+        }
+        return map;
+    }, [plugins]);
+
+    const allProfiles = useMemo<PluginProfile[]>(() => {
+        const builtins = profilesPayload?.builtinProfiles ?? BUILT_IN_PROFILES;
+        const userProfiles = profilesPayload?.userProfiles ?? [];
+        return [...builtins, ...userProfiles];
+    }, [profilesPayload]);
+
+    const activeProfileId = profilesPayload?.activeProfileId ?? DEFAULT_PROFILE_ID;
+    const activeProfile =
+        allProfiles.find((profile) => profile.id === activeProfileId) ?? allProfiles[0];
+    const isCustom = profilesPayload
+        ? isStateCustom(currentEnabledMap, profilesPayload.lastApplied)
+        : false;
+
+    const filteredPlugins = useMemo(() => {
+        const search = searchTerm.trim().toLowerCase();
+        return plugins.filter((plugin) => {
+            const category = plugin.category ?? "other";
+            const enabled = plugin.enabled !== false;
+
+            if (categoryFilter !== "all" && category !== categoryFilter) {
+                return false;
+            }
+
+            if (installedFilter === "installed" && !enabled) {
+                return false;
+            }
+
+            if (installedFilter === "not-installed" && enabled) {
+                return false;
+            }
+
+            if (search) {
+                const haystack = [
+                    plugin.name,
+                    plugin.id,
+                    plugin.description ?? "",
+                    PLUGIN_CATEGORY_LABELS[category],
+                ]
+                    .join(" ")
+                    .toLowerCase();
+
+                if (!haystack.includes(search)) {
+                    return false;
+                }
+            }
+
+            return true;
+        });
+    }, [plugins, searchTerm, installedFilter, categoryFilter]);
+
+    const groupedPlugins = useMemo(() => {
+        const groups = new Map<PluginCategory, PluginManifest[]>();
+        for (const plugin of filteredPlugins) {
+            const category = plugin.category ?? "other";
+            const bucket = groups.get(category) ?? [];
+            bucket.push(plugin);
+            groups.set(category, bucket);
+        }
+        return PLUGIN_CATEGORIES.filter((category) => groups.has(category)).map(
+            (category) => [category, groups.get(category) ?? []] as const,
+        );
+    }, [filteredPlugins]);
+
+    const categoryCounts = useMemo(() => {
+        const counts = new Map<PluginCategory, number>();
+        for (const plugin of plugins) {
+            const category = plugin.category ?? "other";
+            counts.set(category, (counts.get(category) ?? 0) + 1);
+        }
+        return counts;
+    }, [plugins]);
+
+    async function refreshAll() {
         setRequestState("loading");
 
         try {
-            const response = await loadPluginManifests();
-            const nextPlugins = mergeCoreAndUserPluginManifests(response.plugins);
-            setPlugins(nextPlugins);
+            const [manifestResponse, profilesResponse] = await Promise.all([
+                loadPluginManifests(),
+                loadPluginProfiles(),
+            ]);
+            setPlugins(mergeCoreAndUserPluginManifests(manifestResponse.plugins));
+            setProfilesPayload(profilesResponse);
             setStatusMessage("");
             setRequestState("success");
         } catch (error) {
@@ -68,6 +217,7 @@ export function PluginsSettings({ pluginSnapshot }: PluginsSettingsProps) {
             const response = await savePluginEnabled(plugin.id, nextEnabled);
             setPlugins(mergeCoreAndUserPluginManifests(response.plugins ?? []));
             setPluginEnabledState(plugin.id, nextEnabled);
+
             if (plugin.source === "core") {
                 if (nextEnabled) {
                     await loadCoreRuntimePlugin(plugin.id);
@@ -78,13 +228,13 @@ export function PluginsSettings({ pluginSnapshot }: PluginsSettingsProps) {
                 const nextPlugin =
                     response.plugins?.find((item) => item.id === plugin.id) ??
                     response.plugin;
-
                 if (nextPlugin) {
                     await loadRuntimePlugin(nextPlugin);
                 }
             } else {
                 deactivatePlugin(plugin.id);
             }
+
             setStatusMessage(
                 `${plugin.name} ${nextEnabled ? "enabled" : "disabled"}.${
                     plugin.source === "core" || nextEnabled || loadedState(plugin)
@@ -109,207 +259,289 @@ export function PluginsSettings({ pluginSnapshot }: PluginsSettingsProps) {
         );
     }
 
+    async function applyProfile(profile: PluginProfile) {
+        if (!profilesPayload) return;
+        setRequestState("loading");
+
+        try {
+            const { appliedEnabled, enabledChanges, configChanges } =
+                await applyProfileToPlugins(profile, plugins);
+            const refreshed = await loadPluginManifests();
+            setPlugins(mergeCoreAndUserPluginManifests(refreshed.plugins));
+
+            const nextState: PluginProfilesState = {
+                version: 1,
+                activeProfileId: profile.id,
+                lastApplied: appliedEnabled,
+                userProfiles: profilesPayload.userProfiles,
+            };
+            const saved = await savePluginProfilesState(nextState);
+            setProfilesPayload({
+                activeProfileId: saved.state.activeProfileId,
+                lastApplied: saved.state.lastApplied,
+                builtinProfiles: profilesPayload.builtinProfiles,
+                userProfiles: saved.state.userProfiles,
+            });
+
+            const summary =
+                enabledChanges.length === 0 && configChanges.length === 0
+                    ? `${profile.name} applied. No plugins needed to change.`
+                    : `${profile.name} applied. ${enabledChanges.length} toggled, ${configChanges.length} config${configChanges.length === 1 ? "" : "s"} restored.`;
+            setStatusMessage(summary);
+            setRequestState("success");
+        } catch (error) {
+            setStatusMessage(messageFromError(error, "Could not apply profile."));
+            setRequestState("error");
+        }
+    }
+
+    async function resetToActiveProfile() {
+        if (!activeProfile) return;
+        await applyProfile(activeProfile);
+    }
+
+    async function saveCurrentAs(name: string) {
+        if (!profilesPayload) return;
+        const trimmed = name.trim();
+        if (!trimmed) return;
+        const id = slugify(trimmed) || `profile-${Date.now()}`;
+        if (BUILT_IN_PROFILES.some((profile) => profile.id === id)) {
+            setStatusMessage("That name conflicts with a built-in profile.");
+            setRequestState("error");
+            return;
+        }
+
+        setRequestState("loading");
+        try {
+            const pluginConfig = await snapshotAllPluginConfigs(plugins);
+            const newProfile: PluginProfile = {
+                id,
+                name: trimmed,
+                description: "User-defined profile.",
+                builtin: false,
+                enabledPlugins: { ...currentEnabledMap },
+                pluginConfig,
+                defaultEnabled: true,
+            };
+
+            const nextState: PluginProfilesState = {
+                version: 1,
+                activeProfileId: id,
+                lastApplied: { ...currentEnabledMap },
+                userProfiles: [
+                    ...profilesPayload.userProfiles.filter((profile) => profile.id !== id),
+                    newProfile,
+                ],
+            };
+            const saved = await savePluginProfilesState(nextState);
+            setProfilesPayload({
+                activeProfileId: saved.state.activeProfileId,
+                lastApplied: saved.state.lastApplied,
+                builtinProfiles: profilesPayload.builtinProfiles,
+                userProfiles: saved.state.userProfiles,
+            });
+            setStatusMessage(`Saved "${trimmed}" and activated it.`);
+            setRequestState("success");
+        } catch (error) {
+            setStatusMessage(messageFromError(error, "Could not save profile."));
+            setRequestState("error");
+        }
+    }
+
+    async function updateActiveUserProfile() {
+        if (!profilesPayload || !activeProfile || activeProfile.builtin) return;
+        setRequestState("loading");
+        try {
+            const pluginConfig = await snapshotAllPluginConfigs(plugins);
+            const updated: PluginProfile = {
+                ...activeProfile,
+                enabledPlugins: { ...currentEnabledMap },
+                pluginConfig,
+            };
+            const nextState: PluginProfilesState = {
+                version: 1,
+                activeProfileId: activeProfile.id,
+                lastApplied: { ...currentEnabledMap },
+                userProfiles: profilesPayload.userProfiles.map((profile) =>
+                    profile.id === activeProfile.id ? updated : profile,
+                ),
+            };
+            const saved = await savePluginProfilesState(nextState);
+            setProfilesPayload({
+                activeProfileId: saved.state.activeProfileId,
+                lastApplied: saved.state.lastApplied,
+                builtinProfiles: profilesPayload.builtinProfiles,
+                userProfiles: saved.state.userProfiles,
+            });
+            setStatusMessage(`Saved current state to "${activeProfile.name}".`);
+            setRequestState("success");
+        } catch (error) {
+            setStatusMessage(messageFromError(error, "Could not save profile."));
+            setRequestState("error");
+        }
+    }
+
+    async function deleteActiveProfile() {
+        if (!profilesPayload || !activeProfile || activeProfile.builtin) return;
+        setRequestState("loading");
+        try {
+            const response = await deletePluginProfile(activeProfile.id);
+            setProfilesPayload({
+                activeProfileId: response.state.activeProfileId,
+                lastApplied: response.state.lastApplied,
+                builtinProfiles: profilesPayload.builtinProfiles,
+                userProfiles: response.state.userProfiles,
+            });
+            setStatusMessage(`Deleted "${activeProfile.name}". Active profile reset.`);
+            setRequestState("success");
+        } catch (error) {
+            setStatusMessage(messageFromError(error, "Could not delete profile."));
+            setRequestState("error");
+        }
+    }
+
     return (
-        <section className="tool-window">
+        <section className="tool-window plugins-marketplace">
             <div className="plugins-heading">
                 <div>
                     <h2>Plugins</h2>
                     <p>
-                        Core extensions and trusted local plugins loaded from
-                        userData/plugins.
+                        Core extensions and trusted local plugins. Switch profiles to
+                        tune the engine for the experience you want.
                     </p>
                 </div>
                 <button
                     type="button"
                     disabled={requestState === "loading"}
-                    onClick={() => void refreshPlugins()}
+                    onClick={() => void refreshAll()}
                 >
                     <RefreshCw size={16} />
                     Refresh
                 </button>
             </div>
 
-            <div className="plugins-list">
-                {plugins.map((plugin) => {
-                    const loaded = loadedState(plugin);
-                    const enabled = plugin.enabled !== false;
-                    const settingsPanels = settingsPanelsForPlugin(plugin.id);
-                    const showConfiguration = openPluginId === plugin.id;
+            <ProfileBar
+                profiles={allProfiles}
+                activeProfile={activeProfile}
+                isCustom={isCustom}
+                isBusy={requestState === "loading"}
+                onApply={applyProfile}
+                onReset={resetToActiveProfile}
+                onSaveCurrentAs={(name) => void saveCurrentAs(name)}
+                onUpdateActive={updateActiveUserProfile}
+                onDeleteActive={deleteActiveProfile}
+            />
 
+            <div className="marketplace-toolbar">
+                <input
+                    type="search"
+                    className="marketplace-search"
+                    value={searchTerm}
+                    placeholder="Search extensions..."
+                    onInput={(event) =>
+                        setSearchTerm(
+                            (event.currentTarget as HTMLInputElement).value,
+                        )
+                    }
+                />
+                <div className="marketplace-filter-pills">
+                    {(
+                        [
+                            ["all", "All"],
+                            ["installed", "Enabled"],
+                            ["not-installed", "Disabled"],
+                        ] as const
+                    ).map(([value, label]) => (
+                        <button
+                            key={value}
+                            type="button"
+                            className={
+                                installedFilter === value ? "pill pill-active" : "pill"
+                            }
+                            onClick={() => setInstalledFilter(value)}
+                        >
+                            {label}
+                        </button>
+                    ))}
+                </div>
+            </div>
+
+            <div className="marketplace-category-tabs">
+                <button
+                    type="button"
+                    className={
+                        categoryFilter === "all"
+                            ? "category-tab category-tab-active"
+                            : "category-tab"
+                    }
+                    onClick={() => setCategoryFilter("all")}
+                >
+                    <Layers size={14} />
+                    All
+                    <span className="category-tab-count">{plugins.length}</span>
+                </button>
+                {PLUGIN_CATEGORIES.map((category) => {
+                    const Icon = CATEGORY_ICONS[category];
+                    const count = categoryCounts.get(category) ?? 0;
+                    if (count === 0) return null;
                     return (
-                        <article className="plugin-card" key={plugin.id}>
-                            <header>
-                                <div className="plugin-title">
-                                    <Boxes size={18} />
-                                    <div>
-                                        <h3>
-                                            {plugin.name}
-                                            <span
-                                                className={`plugin-source-badge ${
-                                                    plugin.source === "core"
-                                                        ? "core"
-                                                        : "local"
-                                                }`}
-                                            >
-                                                {plugin.source === "core"
-                                                    ? "Core"
-                                                    : "Local"}
-                                            </span>
-                                        </h3>
-                                        <span>{plugin.id}</span>
-                                    </div>
-                                </div>
-                                <label className="plugin-toggle">
-                                    <input
-                                        type="checkbox"
-                                        checked={enabled}
-                                        disabled={requestState === "loading"}
-                                        onChange={() => void togglePlugin(plugin)}
-                                    />
-                                    <span
-                                        className="plugin-toggle-track"
-                                        aria-hidden="true"
-                                    >
-                                        <span />
-                                    </span>
-                                    <span>{enabled ? "Enabled" : "Disabled"}</span>
-                                </label>
-                            </header>
-
-                            {plugin.description && <p>{plugin.description}</p>}
-
-                            <dl className="plugin-meta-grid">
-                                <div>
-                                    <dt>Source</dt>
-                                    <dd>
-                                        {plugin.source === "core"
-                                            ? "Core extension"
-                                            : "Local plugin"}
-                                    </dd>
-                                </div>
-                                <div>
-                                    <dt>Version</dt>
-                                    <dd>{plugin.version}</dd>
-                                </div>
-                                <div>
-                                    <dt>Status</dt>
-                                    <dd
-                                        className={
-                                            loaded?.status === "error"
-                                                ? "plugin-error"
-                                                : ""
-                                        }
-                                    >
-                                        {plugin.source === "core" &&
-                                        enabled &&
-                                        loaded?.status === "loaded" ? (
-                                            <>
-                                                <CheckCircle2 size={14} />
-                                                Built in
-                                            </>
-                                        ) : !enabled ? (
-                                            "Off"
-                                        ) : loaded ? (
-                                            loaded.status === "loaded" ? (
-                                                <>
-                                                    <CheckCircle2 size={14} />
-                                                    Loaded
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <XCircle size={14} />
-                                                    {loaded.error ?? "Load error"}
-                                                </>
-                                            )
-                                        ) : (
-                                            <>
-                                                <Power size={14} />
-                                                Pending restart
-                                            </>
-                                        )}
-                                    </dd>
-                                </div>
-                                <div>
-                                    <dt>Main</dt>
-                                    <dd>{plugin.main}</dd>
-                                </div>
-                                <div>
-                                    <dt>Styles</dt>
-                                    <dd>
-                                        {plugin.styles?.length
-                                            ? plugin.styles.join(", ")
-                                            : "None"}
-                                    </dd>
-                                </div>
-                            </dl>
-
-                            <div className="plugin-permissions">
-                                <span>Permissions</span>
-                                <div>
-                                    {(plugin.permissions?.length
-                                        ? plugin.permissions
-                                        : ["none"]
-                                    ).map((permission) => (
-                                        <code key={permission}>{permission}</code>
-                                    ))}
-                                </div>
-                            </div>
-
-                            <div className="plugin-card-actions">
-                                <button
-                                    type="button"
-                                    onClick={() =>
-                                        setOpenPluginId((current) =>
-                                            current === plugin.id ? "" : plugin.id,
-                                        )
-                                    }
-                                >
-                                    <Settings size={15} />
-                                    {showConfiguration
-                                        ? "Hide configuration"
-                                        : "Configure"}
-                                </button>
-                            </div>
-
-                            {showConfiguration && (
-                                <div className="plugin-config-panel">
-                                    {settingsPanels.length > 0 ? (
-                                        settingsPanels.map((panel) => (
-                                            <section
-                                                className="plugin-config-section"
-                                                key={panel.id}
-                                            >
-                                                <h4>{panel.label}</h4>
-                                                {panel.render({
-                                                    pluginId: plugin.id,
-                                                    snapshot: pluginSnapshot,
-                                                    storage: createPluginStorage(
-                                                        plugin.id,
-                                                    ),
-                                                })}
-                                            </section>
-                                        ))
-                                    ) : loaded?.status === "loaded" ? (
-                                        <p>
-                                            This plugin does not provide custom
-                                            configuration.
-                                        </p>
-                                    ) : enabled ? (
-                                        <p>
-                                            Restart SmileyChat to load this plugin's
-                                            configuration UI.
-                                        </p>
-                                    ) : (
-                                        <p>
-                                            Enable this plugin and restart SmileyChat to
-                                            configure it.
-                                        </p>
-                                    )}
-                                </div>
-                            )}
-                        </article>
+                        <button
+                            key={category}
+                            type="button"
+                            className={
+                                categoryFilter === category
+                                    ? "category-tab category-tab-active"
+                                    : "category-tab"
+                            }
+                            onClick={() => setCategoryFilter(category)}
+                        >
+                            <Icon size={14} />
+                            {PLUGIN_CATEGORY_LABELS[category]}
+                            <span className="category-tab-count">{count}</span>
+                        </button>
                     );
                 })}
+            </div>
+
+            <div className="plugins-list">
+                {groupedPlugins.map(([category, list]) => (
+                    <div className="plugin-category-group" key={category}>
+                        {categoryFilter === "all" && (
+                            <h3 className="plugin-category-heading">
+                                {(() => {
+                                    const Icon = CATEGORY_ICONS[category];
+                                    return <Icon size={15} />;
+                                })()}
+                                {PLUGIN_CATEGORY_LABELS[category]}
+                                <span>{list.length}</span>
+                            </h3>
+                        )}
+                        {list.map((plugin) => (
+                            <PluginCard
+                                key={plugin.id}
+                                plugin={plugin}
+                                loaded={loadedState(plugin)}
+                                showConfiguration={openPluginId === plugin.id}
+                                settingsPanels={settingsPanelsForPlugin(plugin.id)}
+                                pluginSnapshot={pluginSnapshot}
+                                requestState={requestState}
+                                onToggle={() => void togglePlugin(plugin)}
+                                onToggleConfigure={() =>
+                                    setOpenPluginId((current) =>
+                                        current === plugin.id ? "" : plugin.id,
+                                    )
+                                }
+                            />
+                        ))}
+                    </div>
+                ))}
+
+                {filteredPlugins.length === 0 && plugins.length > 0 && (
+                    <div className="empty-plugin-state">
+                        <Search size={20} />
+                        <p>No extensions match these filters.</p>
+                    </div>
+                )}
 
                 {plugins.length === 0 && (
                     <div className="empty-plugin-state">
@@ -326,6 +558,313 @@ export function PluginsSettings({ pluginSnapshot }: PluginsSettingsProps) {
     );
 }
 
+type ProfileBarProps = {
+    profiles: PluginProfile[];
+    activeProfile: PluginProfile | undefined;
+    isCustom: boolean;
+    isBusy: boolean;
+    onApply: (profile: PluginProfile) => void | Promise<void>;
+    onReset: () => void | Promise<void>;
+    onSaveCurrentAs: (name: string) => void;
+    onUpdateActive: () => void | Promise<void>;
+    onDeleteActive: () => void | Promise<void>;
+};
+
+function ProfileBar({
+    profiles,
+    activeProfile,
+    isCustom,
+    isBusy,
+    onApply,
+    onReset,
+    onSaveCurrentAs,
+    onUpdateActive,
+    onDeleteActive,
+}: ProfileBarProps) {
+    const [draftName, setDraftName] = useState("");
+    const [showSaveAs, setShowSaveAs] = useState(false);
+
+    return (
+        <div className="profile-bar">
+            <div className="profile-bar-row">
+                <label className="profile-bar-select">
+                    <span>
+                        <Sparkles size={14} />
+                        Plugin Profile
+                    </span>
+                    <select
+                        value={activeProfile?.id ?? ""}
+                        disabled={isBusy}
+                        onInput={(event) => {
+                            const id = (event.currentTarget as HTMLSelectElement).value;
+                            const next = profiles.find((profile) => profile.id === id);
+                            if (next) void onApply(next);
+                        }}
+                    >
+                        <optgroup label="Built-in">
+                            {profiles
+                                .filter((profile) => profile.builtin)
+                                .map((profile) => (
+                                    <option key={profile.id} value={profile.id}>
+                                        {profile.name}
+                                    </option>
+                                ))}
+                        </optgroup>
+                        {profiles.some((profile) => !profile.builtin) && (
+                            <optgroup label="Yours">
+                                {profiles
+                                    .filter((profile) => !profile.builtin)
+                                    .map((profile) => (
+                                        <option key={profile.id} value={profile.id}>
+                                            {profile.name}
+                                        </option>
+                                    ))}
+                            </optgroup>
+                        )}
+                    </select>
+                </label>
+
+                {isCustom && (
+                    <span className="custom-badge" title="State diverges from this profile">
+                        Custom
+                    </span>
+                )}
+
+                <div className="profile-bar-actions">
+                    <button
+                        type="button"
+                        disabled={isBusy || !isCustom}
+                        onClick={() => void onReset()}
+                        title="Re-apply the active profile"
+                    >
+                        <RotateCcw size={15} />
+                        Reset
+                    </button>
+                    {activeProfile && !activeProfile.builtin && (
+                        <>
+                            <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() => void onUpdateActive()}
+                                title="Save current state to this profile"
+                            >
+                                <Save size={15} />
+                                Save
+                            </button>
+                            <button
+                                type="button"
+                                className="danger-button"
+                                disabled={isBusy}
+                                onClick={() => void onDeleteActive()}
+                            >
+                                <Trash2 size={15} />
+                                Delete
+                            </button>
+                        </>
+                    )}
+                    <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => setShowSaveAs((value) => !value)}
+                    >
+                        <Pencil size={15} />
+                        Save as...
+                    </button>
+                </div>
+            </div>
+
+            {activeProfile?.description && (
+                <p className="profile-bar-description">{activeProfile.description}</p>
+            )}
+
+            {showSaveAs && (
+                <div className="profile-bar-save-as">
+                    <input
+                        type="text"
+                        placeholder="Profile name (e.g. My Lite Setup)"
+                        value={draftName}
+                        onInput={(event) =>
+                            setDraftName(
+                                (event.currentTarget as HTMLInputElement).value,
+                            )
+                        }
+                    />
+                    <button
+                        type="button"
+                        disabled={isBusy || draftName.trim().length === 0}
+                        onClick={() => {
+                            onSaveCurrentAs(draftName);
+                            setDraftName("");
+                            setShowSaveAs(false);
+                        }}
+                    >
+                        <Plus size={15} />
+                        Create
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+}
+
+type PluginCardProps = {
+    plugin: PluginManifest;
+    loaded: ReturnType<typeof getLoadedPlugins>[number] | undefined;
+    showConfiguration: boolean;
+    settingsPanels: ReturnType<typeof getPluginSettingsPanels>;
+    pluginSnapshot: PluginAppSnapshot;
+    requestState: RequestState;
+    onToggle: () => void;
+    onToggleConfigure: () => void;
+};
+
+function PluginCard({
+    plugin,
+    loaded,
+    showConfiguration,
+    settingsPanels,
+    pluginSnapshot,
+    requestState,
+    onToggle,
+    onToggleConfigure,
+}: PluginCardProps) {
+    const enabled = plugin.enabled !== false;
+    const category: PluginCategory = plugin.category ?? "other";
+    const CategoryIcon = CATEGORY_ICONS[category];
+
+    return (
+        <article className="plugin-card">
+            <header>
+                <div className="plugin-title">
+                    <Boxes size={18} />
+                    <div>
+                        <h3>
+                            {plugin.name}
+                            <span
+                                className={`plugin-source-badge ${plugin.source === "core" ? "core" : "local"}`}
+                            >
+                                {plugin.source === "core" ? "Core" : "Local"}
+                            </span>
+                            <span className="plugin-category-badge">
+                                <CategoryIcon size={11} />
+                                {PLUGIN_CATEGORY_LABELS[category]}
+                            </span>
+                        </h3>
+                        <span>{plugin.id}</span>
+                    </div>
+                </div>
+                <label className="plugin-toggle">
+                    <input
+                        type="checkbox"
+                        checked={enabled}
+                        disabled={requestState === "loading"}
+                        onChange={onToggle}
+                    />
+                    <span className="plugin-toggle-track" aria-hidden="true">
+                        <span />
+                    </span>
+                    <span>{enabled ? "Enabled" : "Disabled"}</span>
+                </label>
+            </header>
+
+            {plugin.description && <p>{plugin.description}</p>}
+
+            <dl className="plugin-meta-grid">
+                <div>
+                    <dt>Version</dt>
+                    <dd>{plugin.version}</dd>
+                </div>
+                <div>
+                    <dt>Status</dt>
+                    <dd
+                        className={loaded?.status === "error" ? "plugin-error" : ""}
+                    >
+                        {plugin.source === "core" &&
+                        enabled &&
+                        loaded?.status === "loaded" ? (
+                            <>
+                                <CheckCircle2 size={14} />
+                                Built in
+                            </>
+                        ) : !enabled ? (
+                            "Off"
+                        ) : loaded ? (
+                            loaded.status === "loaded" ? (
+                                <>
+                                    <CheckCircle2 size={14} />
+                                    Loaded
+                                </>
+                            ) : (
+                                <>
+                                    <XCircle size={14} />
+                                    {loaded.error ?? "Load error"}
+                                </>
+                            )
+                        ) : (
+                            <>
+                                <Power size={14} />
+                                Pending restart
+                            </>
+                        )}
+                    </dd>
+                </div>
+            </dl>
+
+            {plugin.permissions && plugin.permissions.length > 0 && (
+                <div className="plugin-permissions">
+                    <span>Permissions</span>
+                    <div>
+                        {plugin.permissions.map((permission) => (
+                            <code key={permission}>{permission}</code>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            <div className="plugin-card-actions">
+                <button type="button" onClick={onToggleConfigure}>
+                    <Settings size={15} />
+                    {showConfiguration ? "Hide configuration" : "Configure"}
+                </button>
+            </div>
+
+            {showConfiguration && (
+                <div className="plugin-config-panel">
+                    {settingsPanels.length > 0 ? (
+                        settingsPanels.map((panel) => (
+                            <section
+                                className="plugin-config-section"
+                                key={panel.id}
+                            >
+                                <h4>{panel.label}</h4>
+                                {panel.render({
+                                    pluginId: plugin.id,
+                                    snapshot: pluginSnapshot,
+                                    storage: createPluginStorage(plugin.id),
+                                })}
+                            </section>
+                        ))
+                    ) : loaded?.status === "loaded" ? (
+                        <p>This plugin does not provide custom configuration.</p>
+                    ) : enabled ? (
+                        <p>Restart SmileyChat to load this plugin's configuration UI.</p>
+                    ) : (
+                        <p>Enable this plugin and restart SmileyChat to configure it.</p>
+                    )}
+                </div>
+            )}
+        </article>
+    );
+}
+
 function pluginIdFromScopedId(id: string) {
     return id.split(":")[0] || id;
+}
+
+function slugify(value: string) {
+    return value
+        .toLowerCase()
+        .replace(/[^a-z0-9-_]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 60);
 }
