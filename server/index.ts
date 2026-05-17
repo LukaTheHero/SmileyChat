@@ -49,10 +49,17 @@ import {
     proxyPluginFetch,
     readPluginManifests,
     readPluginStorage,
+    readPluginStorageSnapshot,
     servePluginAsset,
     updatePluginEnabled,
     writePluginStorage,
+    writePluginStorageSnapshot,
 } from "./plugins";
+import {
+    deleteUserPluginProfile,
+    readPluginProfiles,
+    writePluginProfiles,
+} from "./plugin-profiles";
 import { finalize, runSecurityPipeline } from "./security/pipeline";
 import {
     readAppPreferences,
@@ -123,6 +130,22 @@ const server = Bun.serve({
             }),
         },
 
+        "/api/plugins/profiles": {
+            GET: api(async () => {
+                return readPluginProfiles();
+            }),
+
+            PUT: api(async (request) => {
+                return writePluginProfiles(await readJsonBody(request));
+            }),
+        },
+
+        "/api/plugins/profiles/:profileId": {
+            DELETE: api(async (request) => {
+                return deleteUserPluginProfile(request.params.profileId);
+            }),
+        },
+
         "/api/plugins/:pluginId": {
             PUT: api(async (request) => {
                 const body = await readJsonBody(request);
@@ -132,6 +155,19 @@ const server = Bun.serve({
                         : undefined;
 
                 return updatePluginEnabled(request.params.pluginId, enabled);
+            }),
+        },
+
+        "/api/plugins/:pluginId/storage": {
+            GET: api(async (request) => {
+                return readPluginStorageSnapshot(request.params.pluginId);
+            }),
+
+            PUT: api(async (request) => {
+                return writePluginStorageSnapshot(
+                    request.params.pluginId,
+                    await readJsonBody(request),
+                );
             }),
         },
 

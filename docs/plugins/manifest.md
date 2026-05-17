@@ -11,7 +11,8 @@ Each plugin needs a `plugin.json` file at the root of its plugin folder.
     "main": "dist/index.js",
     "styles": ["dist/style.css"],
     "permissions": ["chat:output", "ui:styles"],
-    "enabled": true
+    "enabled": true,
+    "category": "interface"
 }
 ```
 
@@ -73,6 +74,20 @@ Recommended labels:
 `enabled`
 
 Optional boolean. Defaults to `true`. The Options > Plugins toggle writes this field.
+
+`category`
+
+Optional category label used purely for grouping plugins in Options > Plugins. Does not affect permissions or trust. Defaults to `other` when omitted or unrecognized.
+
+Accepted values:
+
+- `interface` — visual UI additions, message renderers, themes, side panels.
+- `input-output` — transforms drafts, prompts, chat messages, or rendered output.
+- `automation` — performs app actions automatically or semi-automatically.
+- `connections` — adds model providers or provider-specific adapters.
+- `tools` — explicit user-triggered utilities, slash commands, dice rollers, exporters.
+- `memory-lore` — context, lorebooks, summaries, retrieval, long-term memory.
+- `other` — fallback for uncategorized plugins.
 
 ## Runtime URLs
 

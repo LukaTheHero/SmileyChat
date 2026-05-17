@@ -18,6 +18,28 @@ import type {
 import type { MacroContext } from "../presets/macros";
 import type { PresetCollection } from "../presets/types";
 
+export const PLUGIN_CATEGORIES = [
+    "interface",
+    "input-output",
+    "automation",
+    "connections",
+    "tools",
+    "memory-lore",
+    "other",
+] as const;
+
+export type PluginCategory = (typeof PLUGIN_CATEGORIES)[number];
+
+export const PLUGIN_CATEGORY_LABELS: Record<PluginCategory, string> = {
+    interface: "Interface",
+    "input-output": "Input & Output",
+    automation: "Automation",
+    connections: "Connections",
+    tools: "Tools",
+    "memory-lore": "Memory & Lore",
+    other: "Other",
+};
+
 export type PluginManifest = {
     id: string;
     name: string;
@@ -30,6 +52,7 @@ export type PluginManifest = {
     entryUrl?: string;
     styleUrls?: string[];
     source?: "core" | "user";
+    category?: PluginCategory;
 };
 
 export type LoadedPlugin = {

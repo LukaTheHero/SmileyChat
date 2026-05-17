@@ -1,8 +1,12 @@
 import { Glob } from "bun";
-import { mkdir, rm } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, normalize, relative } from "node:path";
+import { mkdir, readdir, rm } from "node:fs/promises";
+import { basename, dirname, extname, isAbsolute, join, normalize, relative } from "node:path";
 
-import type { PluginManifest } from "#frontend/lib/plugins/types";
+import {
+    PLUGIN_CATEGORIES,
+    type PluginCategory,
+    type PluginManifest,
+} from "#frontend/lib/plugins/types";
 
 import { isPluginsOutboundFetchAllowed } from "./config/runtime-config";
 import { BadRequestError, HttpError, json, writeJsonAtomic } from "./http";
@@ -189,6 +193,83 @@ export async function writePluginStorage(pluginId: string, key: string, value: u
     return json({ ok: true });
 }
 
+export async function readPluginStorageSnapshot(pluginId: string) {
+    const pluginRecord = await findPluginById(pluginId);
+
+    if (!pluginRecord) {
+        return json({ error: "Plugin not found." }, 404);
+    }
+
+    const folder = pluginDataDir(pluginRecord.folderName, pluginRecord.source);
+    const storage: Record<string, unknown> = {};
+
+    try {
+        const entries = await readdir(folder);
+
+        for (const entry of entries) {
+            if (extname(entry) !== ".json") {
+                continue;
+            }
+
+            const key = basename(entry, ".json");
+            const file = Bun.file(join(folder, entry));
+
+            if (!(await file.exists())) {
+                continue;
+            }
+
+            try {
+                storage[key] = await file.json();
+            } catch {
+                // skip unreadable entries
+            }
+        }
+    } catch {
+        // directory doesn't exist yet — empty snapshot is fine
+    }
+
+    return json({ pluginId, storage });
+}
+
+export async function writePluginStorageSnapshot(pluginId: string, body: unknown) {
+    const pluginRecord = await findPluginById(pluginId);
+
+    if (!pluginRecord) {
+        return json({ error: "Plugin not found." }, 404);
+    }
+
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+        return json({ error: "Body must be an object." }, 400);
+    }
+
+    const payload = body as Record<string, unknown>;
+    const storage =
+        payload.storage && typeof payload.storage === "object"
+            ? (payload.storage as Record<string, unknown>)
+            : payload;
+
+    const folder = pluginDataDir(pluginRecord.folderName, pluginRecord.source);
+
+    await rm(folder, { recursive: true, force: true });
+    await mkdir(folder, { recursive: true });
+
+    for (const [key, value] of Object.entries(storage)) {
+        try {
+            await writeJsonAtomic(
+                pluginStoragePath(pluginRecord.folderName, key, pluginRecord.source),
+                value,
+            );
+        } catch (error) {
+            console.warn(
+                `Could not restore plugin storage ${pluginId}/${key}:`,
+                error,
+            );
+        }
+    }
+
+    return json({ ok: true });
+}
+
 export async function deletePluginStorage(pluginId: string, key: string) {
     const pluginRecord = await findPluginById(pluginId);
 
@@ -329,7 +410,15 @@ function normalizePluginManifest(
         styles,
         permissions,
         enabled: manifest.enabled !== false,
+        category: normalizeCategory(manifest.category),
     };
+}
+
+function normalizeCategory(value: unknown): PluginCategory {
+    return typeof value === "string" &&
+        (PLUGIN_CATEGORIES as readonly string[]).includes(value)
+        ? (value as PluginCategory)
+        : "other";
 }
 
 async function readCorePluginManifests() {
@@ -352,8 +441,13 @@ async function readCorePluginManifest(pluginId: string): Promise<PluginManifest>
         main: "",
         enabled: state.enabled,
         source: "core",
+        category: corePluginCategories[pluginId] ?? "other",
     };
 }
+
+const corePluginCategories: Record<string, PluginCategory> = {
+    "smiley-chat-formatter": "interface",
+};
 
 async function readCorePluginState(pluginId: string) {
     const file = Bun.file(corePluginEnabledPath(pluginId));

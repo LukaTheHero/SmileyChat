@@ -9,6 +9,7 @@ import type {
 } from "#frontend/types";
 
 import type { ConnectionSecrets, ConnectionSettings } from "../connections/config";
+import type { PluginProfile, PluginProfilesState } from "../plugins/profiles";
 import type { PluginManifest } from "../plugins/types";
 import type { AppPreferences } from "../preferences/types";
 import type { PresetCollection } from "../presets/types";
@@ -237,6 +238,48 @@ export function savePluginEnabled(pluginId: string, enabled: boolean) {
         plugin?: PluginManifest;
         plugins?: PluginManifest[];
     }>(`/api/plugins/${encodeURIComponent(pluginId)}`, jsonInit("PUT", { enabled }));
+}
+
+export type PluginProfilesPayload = {
+    activeProfileId: string;
+    lastApplied: Record<string, boolean>;
+    builtinProfiles: PluginProfile[];
+    userProfiles: PluginProfile[];
+};
+
+export function loadPluginProfiles() {
+    return requestJson<PluginProfilesPayload>("/api/plugins/profiles");
+}
+
+export function savePluginProfilesState(state: PluginProfilesState) {
+    return requestJson<{ ok: true; state: PluginProfilesState }>(
+        "/api/plugins/profiles",
+        jsonInit("PUT", state),
+    );
+}
+
+export function deletePluginProfile(profileId: string) {
+    return requestJson<{ ok: true; state: PluginProfilesState }>(
+        `/api/plugins/profiles/${encodeURIComponent(profileId)}`,
+        { method: "DELETE" },
+    );
+}
+
+export function loadPluginStorageSnapshot(pluginId: string) {
+    return requestJson<{
+        pluginId: string;
+        storage: Record<string, unknown>;
+    }>(`/api/plugins/${encodeURIComponent(pluginId)}/storage`);
+}
+
+export function savePluginStorageSnapshot(
+    pluginId: string,
+    storage: Record<string, unknown>,
+) {
+    return requestJson<{ ok: true }>(
+        `/api/plugins/${encodeURIComponent(pluginId)}/storage`,
+        jsonInit("PUT", { storage }),
+    );
 }
 
 export function savePresetCollection(presets: PresetCollection) {
