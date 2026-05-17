@@ -6,13 +6,10 @@ import { createClaudeMaxAdapter } from "./adapter";
 import { defaultClaudeMaxConfig, normalizeClaudeMaxConfig } from "./config";
 import { claudeMaxManifest } from "./manifest";
 import { renderClaudeMaxSettings } from "./settings-panel";
-import styles from "./styles.css?raw";
 
 export { claudeMaxManifest };
 
 export async function activate(api: SmileyPluginApi) {
-    api.ui.addStyles(styles);
-
     api.connections.registerProvider({
         id: "claude-max",
         label: "Claude Max",

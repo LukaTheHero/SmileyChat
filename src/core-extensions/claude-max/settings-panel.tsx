@@ -52,10 +52,6 @@ export function renderClaudeMaxSettings({
         updateConfig({ thinking: value });
     };
 
-    const onFastModeChange = (checked: boolean) => {
-        updateConfig({ fastMode: checked });
-    };
-
     const matchedModel = findClaudeMaxModel(config.model.id);
 
     return (
@@ -130,27 +126,6 @@ export function renderClaudeMaxSettings({
                     </option>
                     <option value="off">Off</option>
                 </select>
-            </label>
-
-            <label className="claude-max-toggle-row">
-                <input
-                    type="checkbox"
-                    checked={config.fastMode}
-                    disabled={disabled}
-                    onChange={(event) =>
-                        onFastModeChange(
-                            (event.currentTarget as HTMLInputElement).checked,
-                        )
-                    }
-                />
-                <span>
-                    Fast Mode (claude --fast)
-                    <small>
-                        Asks the CLI to skip optional thinking and tool steps for
-                        snappier replies. The setting is forwarded to the SDK and only
-                        takes effect on CLI versions that honor it.
-                    </small>
-                </span>
             </label>
 
             <div className="connection-actions">

@@ -6,7 +6,6 @@ export type ClaudeMaxConfig = {
         id: string;
     };
     thinking: ClaudeMaxThinkingMode;
-    fastMode: boolean;
 };
 
 export type ClaudeMaxModel = {

@@ -9,7 +9,6 @@ const installInstructions =
 type GenerateRequestBody = {
     model: string;
     thinking: "off" | "adaptive";
-    fastMode: boolean;
     systemPrompt?: string;
     messages: Array<{ role: "user" | "assistant"; content: string }>;
     stream: boolean;
@@ -24,7 +23,6 @@ type SdkOptions = {
     permissionMode: "bypassPermissions";
     includePartialMessages: boolean;
     thinking?: { type: "adaptive" };
-    fastMode?: boolean;
 };
 
 type SdkMessage =
@@ -127,10 +125,6 @@ function buildSdkOptions(body: GenerateRequestBody): SdkOptions {
 
     if (body.thinking === "adaptive" && opusFourSevenPlus.test(body.model)) {
         options.thinking = { type: "adaptive" };
-    }
-
-    if (body.fastMode) {
-        options.fastMode = true;
     }
 
     return options;
@@ -360,7 +354,6 @@ async function readGenerateBody(request: Request): Promise<GenerateRequestBody> 
     return {
         model,
         thinking: raw.thinking === "off" ? "off" : "adaptive",
-        fastMode: raw.fastMode === true,
         systemPrompt:
             typeof raw.systemPrompt === "string" && raw.systemPrompt.trim()
                 ? raw.systemPrompt

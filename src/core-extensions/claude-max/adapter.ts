@@ -41,7 +41,6 @@ export function createClaudeMaxAdapter(config: ClaudeMaxConfig): ConnectionAdapt
                 body: JSON.stringify({
                     model: safeConfig.model.id,
                     thinking: safeConfig.thinking,
-                    fastMode: safeConfig.fastMode,
                     systemPrompt,
                     messages: conversation,
                     stream,

@@ -7,7 +7,7 @@ export const claudeMaxManifest: PluginManifest = {
     description:
         "Talk to Anthropic models using your Claude Pro or Max subscription via the local claude CLI. Requires the official Claude Code CLI to be installed and logged in on this machine.",
     main: "core-extensions/claude-max",
-    permissions: ["connections:providers", "ui:settings", "ui:styles"],
+    permissions: ["connections:providers"],
     enabled: true,
     source: "core",
 };

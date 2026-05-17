@@ -9,7 +9,6 @@ export const defaultClaudeMaxConfig: ClaudeMaxConfig = {
         id: claudeMaxModels[0]?.id ?? "claude-opus-4-7",
     },
     thinking: "adaptive",
-    fastMode: false,
 };
 
 export function normalizeClaudeMaxConfig(value: unknown): ClaudeMaxConfig {
@@ -24,7 +23,6 @@ export function normalizeClaudeMaxConfig(value: unknown): ClaudeMaxConfig {
     return {
         model: { source, id },
         thinking: normalizeThinkingMode(raw.thinking),
-        fastMode: typeof raw.fastMode === "boolean" ? raw.fastMode : false,
     };
 }
 
