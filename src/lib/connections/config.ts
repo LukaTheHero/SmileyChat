@@ -289,12 +289,18 @@ export function createConnectionProfile(
     }
 
     if (provider === "claude-max") {
+        const claudeMaxConfig = normalizeClaudeMaxConfig(
+            defaultConfig ?? defaultClaudeMaxConfig,
+        );
+
         return {
             id: createConnectionProfileId(),
             name,
             provider,
-            contextTokenBudget: defaultContextTokenBudget,
-            config: normalizeClaudeMaxConfig(defaultConfig ?? defaultClaudeMaxConfig),
+            contextTokenBudget: normalizeContextTokenBudget(
+                claudeMaxConfig.contextWindow,
+            ),
+            config: claudeMaxConfig,
             createdAt: now,
             updatedAt: now,
         };

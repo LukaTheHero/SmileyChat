@@ -753,13 +753,15 @@ export function ConnectionsSettings({
                         </label>
                     </div>
 
-                    <label className="connection-context-limit-field">
-                        Context token limit
-                        <ContextTokenLimitControl
-                            value={activeProfile.contextTokenBudget}
-                            onChange={updateActiveProfileContextTokenBudget}
-                        />
-                    </label>
+                    {!isClaudeMaxProfile(activeProfile) && (
+                        <label className="connection-context-limit-field">
+                            Context token limit
+                            <ContextTokenLimitControl
+                                value={activeProfile.contextTokenBudget}
+                                onChange={updateActiveProfileContextTokenBudget}
+                            />
+                        </label>
+                    )}
 
                     {isOpenAICompatibleProfile(activeProfile) ? (
                         <OpenAICompatibleConnection
@@ -798,7 +800,18 @@ export function ConnectionsSettings({
                         <ClaudeMaxConnection
                             config={activeProfile.config}
                             disabled={isBusy}
-                            onChange={(config) => updateActiveProfileConfig(config)}
+                            onChange={(config) => {
+                                updateActiveProfileConfig(config);
+
+                                if (
+                                    config.contextWindow !==
+                                    activeProfile.config.contextWindow
+                                ) {
+                                    updateActiveProfileContextTokenBudget(
+                                        config.contextWindow,
+                                    );
+                                }
+                            }}
                             onSave={() => void saveSettings()}
                             onTest={testConnection}
                         />
