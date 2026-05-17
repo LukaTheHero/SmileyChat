@@ -86,6 +86,9 @@ export function MessageList({
     );
     const [showJumpToBottom, setShowJumpToBottom] = useState(false);
     const [openMenuMessageId, setOpenMenuMessageId] = useState("");
+    const [messageMenuPlacement, setMessageMenuPlacement] = useState<"above" | "below">(
+        "below",
+    );
     const [editingMessageId, setEditingMessageId] = useState("");
     const [editingDraft, setEditingDraft] = useState("");
 
@@ -165,6 +168,32 @@ export function MessageList({
         setEditingMessageId(message.id);
         setEditingDraft(getMessageContent(message));
         setOpenMenuMessageId("");
+    }
+
+    function toggleMessageMenu(messageId: string, trigger: HTMLButtonElement) {
+        if (openMenuMessageId === messageId) {
+            setOpenMenuMessageId("");
+            return;
+        }
+
+        const list = listRef.current;
+        const listRect = list?.getBoundingClientRect();
+        const triggerRect = trigger.getBoundingClientRect();
+        const estimatedMenuHeight = 146 + pluginMessageActions.length * 32;
+
+        if (listRect) {
+            const spaceBelow = listRect.bottom - triggerRect.bottom;
+            const spaceAbove = triggerRect.top - listRect.top;
+            setMessageMenuPlacement(
+                spaceBelow < estimatedMenuHeight && spaceAbove > spaceBelow
+                    ? "above"
+                    : "below",
+            );
+        } else {
+            setMessageMenuPlacement("below");
+        }
+
+        setOpenMenuMessageId(messageId);
     }
 
     function saveEdit(messageId: string) {
@@ -379,6 +408,11 @@ export function MessageList({
                                     )}
                                     <div
                                         className="message-menu-wrap"
+                                        data-menu-placement={
+                                            openMenuMessageId === message.id
+                                                ? messageMenuPlacement
+                                                : undefined
+                                        }
                                         ref={
                                             openMenuMessageId === message.id
                                                 ? openMenuRef
@@ -393,11 +427,10 @@ export function MessageList({
                                             aria-expanded={
                                                 openMenuMessageId === message.id
                                             }
-                                            onClick={() =>
-                                                setOpenMenuMessageId((current) =>
-                                                    current === message.id
-                                                        ? ""
-                                                        : message.id,
+                                            onClick={(event) =>
+                                                toggleMessageMenu(
+                                                    message.id,
+                                                    event.currentTarget,
                                                 )
                                             }
                                         >
